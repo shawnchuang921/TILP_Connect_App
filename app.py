@@ -1,7 +1,8 @@
-# app.py (Standardized Version)
+# app.py (Final Version with Billing & Schedule)
 import streamlit as st
 from views.database import init_db, get_user
-from views import tracker, planner, dashboard, admin_tools 
+# IMPORT NEW MODULES HERE
+from views import tracker, planner, dashboard, admin_tools, billing, schedule
 
 # Initialize Database
 init_db()
@@ -23,7 +24,6 @@ def login_screen():
             
             if user_data:
                 st.session_state["logged_in"] = True
-                # Standardizing keys to ensure dashboard.py can find them
                 st.session_state["role"] = str(user_data["role"])
                 st.session_state["username"] = user_data["username"]
                 st.session_state["child_link"] = user_data.get("child_link", "")
@@ -33,7 +33,6 @@ def login_screen():
                 st.error("Incorrect username or password")
 
 def main():
-    # Check Login Status
     if "logged_in" not in st.session_state:
         st.session_state["logged_in"] = False
 
@@ -42,7 +41,6 @@ def main():
         return
 
     # --- SIDEBAR NAVIGATION ---
-    # Retrieve role and force to lowercase for reliable comparison
     user_role = str(st.session_state.get("role", "")).lower()
     username = st.session_state.get("username", "User")
     
@@ -52,25 +50,36 @@ def main():
     # Define available pages based on Role
     pages = {}
     
-    # 1. Admin Tools (Admin Only)
+    # 1. ADMIN TOOLS
     if user_role == "admin":
         pages["🔑 Admin Tools"] = admin_tools.show_page
+        pages["🗓️ Master Schedule"] = schedule.show_page
+        pages["💳 Billing Management"] = billing.show_page
     
-    # 2. Staff Tools (Admin + All Therapist/Staff roles)
-    # We use a lowercase list to match our lowercase user_role
+    # 2. STAFF TOOLS (Therapists, ECE, Staff)
+    # Note: Staff view remains exactly as it was.
     staff_roles = ["admin", "ot", "slp", "bc", "ece", "assistant", "staff", "therapist"]
     if user_role in staff_roles:
         pages["📝 Progress Tracker"] = tracker.show_page
         pages["📅 Daily Planner"] = planner.show_page
+        # If user is Admin, they see the dashboard here too
+        if user_role == "admin":
+            pages["📊 Program Dashboard"] = dashboard.show_page
+        else:
+            pages["📊 Dashboard & Reports"] = dashboard.show_page
     
-    # 3. Dashboard (Available to everyone, but view changes inside dashboard.py)
+    # 3. PARENT TOOLS (Expanded)
     if user_role == "parent":
-        child_name = st.session_state.get("child_link", "My Child")
-        pages[f"📊 My Child's Dashboard"] = dashboard.show_page
-    else:
-        pages["📊 Dashboard & Reports"] = dashboard.show_page
+        # 1. Existing Dashboard (Progress & Attendance) - UNTOUCHED
+        pages[f"📊 Dashboard"] = dashboard.show_page
+        
+        # 2. NEW: Appointment Schedule
+        pages[f"🗓️ Appointments"] = schedule.show_page
+        
+        # 3. NEW: Billing & Invoices
+        pages[f"💳 Billing & Invoices"] = billing.show_page
 
-    # Sidebar selection
+    # Sidebar Selection
     selection = st.sidebar.radio("Go to:", list(pages.keys()))
     
     st.sidebar.divider()
