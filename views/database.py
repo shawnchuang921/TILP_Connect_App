@@ -1,4 +1,4 @@
-# views/database.py (FINAL VERSION - Hardcoded Users Removed)
+# views/database.py (FINAL VERSION - Including all features and delete_attendance)
 import pandas as pd
 from datetime import datetime
 import streamlit as st 
@@ -83,12 +83,20 @@ def init_db():
             internal_notes TEXT
         )'''))
 
+        # --- NEW: ATTENDANCE TABLE ---
+        conn.execute(text('''CREATE TABLE IF NOT EXISTS attendance (
+            id SERIAL PRIMARY KEY,
+            date TEXT,
+            child_name TEXT,
+            status TEXT, 
+            logged_by TEXT,
+            UNIQUE (date, child_name)
+        )'''))
+
+
         # Initial Data Load
-        # KEEP: The admin user is kept for initial access.
         conn.execute(text("INSERT INTO users (username, password, role, child_link) VALUES (:u, :p, :r, :c) ON CONFLICT (username) DO NOTHING"),
                      {"u": "adminuser", "p": "admin123", "r": "admin", "c": "All"})
-        
-        # REMOVED: otuser and slpuser hardcoding is removed here.
         
         # Add default disciplines/roles
         for d in ["OT", "SLP", "BC", "ECE", "Assistant"]:
@@ -273,4 +281,54 @@ def save_plan(date, lead_staff, support_staff, warm_up, learning_block, regulati
             "wu": warm_up, "lb": learning_block, "rb": regulation_break, 
             "sp": social_play, "cr": closing_routine, "mn": materials_needed, "in": internal_notes
         })
+        conn.commit()
+
+# --- Attendance Functions (NEW) ---
+
+def upsert_attendance(date, child_name, status, logged_by):
+    """Inserts or updates a daily attendance record."""
+    if not ENGINE: return
+    sql_stmt = text("""
+        INSERT INTO attendance (date, child_name, status, logged_by) 
+        VALUES (:d, :cn, :s, :lb)
+        ON CONFLICT (date, child_name) DO UPDATE 
+        SET status = EXCLUDED.status, 
+            logged_by = EXCLUDED.logged_by;
+    """)
+    with ENGINE.connect() as conn:
+        conn.execute(sql_stmt, {
+            "d": date, "cn": child_name, "s": status, "lb": logged_by
+        })
+        conn.commit()
+
+def get_attendance_data(date=None, child_name=None):
+    """Retrieves attendance data, filtered by date or child."""
+    if not ENGINE: return pd.DataFrame()
+    
+    query = "SELECT * FROM attendance"
+    params = {}
+    
+    if date and child_name:
+        query += " WHERE date = :d AND child_name = :cn"
+        params = {"d": date, "cn": child_name}
+    elif date:
+        query += " WHERE date = :d"
+        params = {"d": date}
+    elif child_name:
+        query += " WHERE child_name = :cn ORDER BY date DESC"
+        params = {"cn": child_name}
+    else:
+        # No filters, order by date descending
+        query += " ORDER BY date DESC"
+
+    with ENGINE.connect() as conn:
+        df = pd.read_sql_query(text(query), conn, params=params)
+    return df
+
+def delete_attendance(id):
+    """Deletes an attendance entry by ID."""
+    if not ENGINE: return
+    sql_stmt = text("DELETE FROM attendance WHERE id = :id")
+    with ENGINE.connect() as conn:
+        conn.execute(sql_stmt, {"id": id})
         conn.commit()
