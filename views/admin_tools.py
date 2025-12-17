@@ -1,4 +1,4 @@
-# views/admin_tools.py (NEW FILE - Fixed Import)
+# views/admin_tools.py (FINAL VERSION - Fixed upsert_child arguments)
 import streamlit as st
 # FIXED: Using relative import (dot) since database.py is in the same folder
 from .database import get_list_data, upsert_user, delete_user, upsert_child, delete_child, upsert_list_item, delete_list_item 
@@ -12,7 +12,7 @@ def show_page():
 
     tab1, tab2, tab3 = st.tabs(["👤 User Accounts", "👨‍👩‍👧‍👦 Child Profiles", "📝 Custom Lists"])
 
-    # --- TAB 1: USER ACCOUNTS (Request 2) ---
+    # --- TAB 1: USER ACCOUNTS ---
     with tab1:
         st.header("Staff and Parent Logins")
         df_users = get_list_data("users")
@@ -65,19 +65,22 @@ def show_page():
                     
                     # Update child's parent_username in children table if linked
                     if final_child_link != "All":
-                        upsert_child(final_child_link, username)
+                        # FIX 1: Added third argument (Date of Birth) to upsert_child
+                        # The Admin tool does not manage DOB here, so we pass a blank string.
+                        upsert_child(final_child_link, username, "") 
 
                     st.success(f"User '{username}' ({role}) saved successfully.")
                     st.rerun()
                 else:
                     st.error("Username is required.")
-            
+                
             if col6.form_submit_button("🗑️ Delete User"):
                 if username and username != st.session_state["username"]: # Prevent deleting logged-in user
                     # Unlink child before deleting user
                     current_link = df_users[df_users['username'] == username]['child_link'].iloc[0] if username in df_users['username'].values else 'All'
                     if current_link != 'All':
-                        upsert_child(current_link, "None")
+                        # FIX 2: Added third argument (Date of Birth) to upsert_child
+                        upsert_child(current_link, "None", "") 
                         
                     delete_user(username)
                     st.warning(f"User '{username}' deleted.")
@@ -85,7 +88,7 @@ def show_page():
                 else:
                     st.error("Cannot delete yourself or username is blank.")
 
-    # --- TAB 2: CHILD PROFILES (Request 1) ---
+    # --- TAB 2: CHILD PROFILES ---
     with tab2:
         st.header("Client Child Profiles")
         df_children = get_list_data("children")
@@ -96,9 +99,9 @@ def show_page():
             col1, col2 = st.columns(2)
             
             child_name = col1.text_input("Child Name (ID)", help="Must be unique.")
-            # Default to today, or the existing DOB if editing
+            
             existing_dob = df_children[df_children['child_name'] == child_name]['date_of_birth'].iloc[0] if child_name in df_children['child_name'].values else date.today().isoformat()
-            dob = col2.date_input("Date of Birth (Optional)", value=pd.to_datetime(existing_dob) if pd.notna(existing_dob) else date.today())
+            dob = col2.date_input("Date of Birth (Optional)", value=pd.to_datetime(existing_dob) if pd.notna(existing_dob) and existing_dob != "" else date.today())
             
             # Get list of users with role 'parent' and ensure they are unassigned
             parent_df = df_users[df_users["role"] == "parent"]
@@ -119,7 +122,7 @@ def show_page():
                 if child_name:
                     final_parent = parent_link if parent_link != "None/Unassigned" else "None"
                     
-                    # 1. Update/Insert Child record
+                    # 1. Update/Insert Child record (This section already calls upsert_child correctly with 3 arguments)
                     upsert_child(child_name, final_parent, dob.isoformat())
                     
                     # 2. Update the newly assigned parent's user record (if one was selected)
@@ -139,7 +142,7 @@ def show_page():
                     st.warning(f"Child '{child_name}' deleted. Parent link removed.")
                     st.rerun()
 
-    # --- TAB 3: CUSTOM LISTS (Request 3) ---
+    # --- TAB 3: CUSTOM LISTS ---
     with tab3:
         st.header("Manage Goal Areas and Disciplines")
         
