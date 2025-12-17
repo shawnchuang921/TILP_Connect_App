@@ -1,4 +1,4 @@
-# app.py (FINAL VERSION)
+# app.py (Standardized Version)
 import streamlit as st
 from views.database import init_db, get_user
 from views import tracker, planner, dashboard, admin_tools 
@@ -23,11 +23,11 @@ def login_screen():
             
             if user_data:
                 st.session_state["logged_in"] = True
-                # CRITICAL FIX: Storing role under the key "role"
-                st.session_state["role"] = user_data["role"] 
+                # Standardizing keys to ensure dashboard.py can find them
+                st.session_state["role"] = str(user_data["role"])
                 st.session_state["username"] = user_data["username"]
-                st.session_state["child_link"] = user_data["child_link"]
-                st.success(f"Welcome, {user_data['username']} ({user_data['role']})!")
+                st.session_state["child_link"] = user_data.get("child_link", "")
+                st.success(f"Welcome, {user_data['username']}!")
                 st.rerun()
             else:
                 st.error("Incorrect username or password")
@@ -42,40 +42,47 @@ def main():
         return
 
     # --- SIDEBAR NAVIGATION ---
-    # Retrieve role using the corrected key "role"
-    user_role = st.session_state["role"] 
-    username = st.session_state["username"]
-    st.sidebar.title(f"👤 User: {username.capitalize()}")
+    # Retrieve role and force to lowercase for reliable comparison
+    user_role = str(st.session_state.get("role", "")).lower()
+    username = st.session_state.get("username", "User")
+    
+    st.sidebar.title(f"👤 {username.capitalize()}")
     st.sidebar.markdown(f"**Role:** {user_role.upper()}")
     
     # Define available pages based on Role
     pages = {}
     
-    # Admin has all permissions
+    # 1. Admin Tools (Admin Only)
     if user_role == "admin":
         pages["🔑 Admin Tools"] = admin_tools.show_page
     
-    # Staff/Therapists/Admin roles
-    if user_role in ["admin", "OT", "SLP", "BC", "ECE", "Assistant", "staff"]:
+    # 2. Staff Tools (Admin + All Therapist/Staff roles)
+    # We use a lowercase list to match our lowercase user_role
+    staff_roles = ["admin", "ot", "slp", "bc", "ece", "assistant", "staff", "therapist"]
+    if user_role in staff_roles:
         pages["📝 Progress Tracker"] = tracker.show_page
         pages["📅 Daily Planner"] = planner.show_page
     
-    # Dashboard view changes based on role
+    # 3. Dashboard (Available to everyone, but view changes inside dashboard.py)
     if user_role == "parent":
         child_name = st.session_state.get("child_link", "My Child")
         pages[f"📊 My Child's Dashboard"] = dashboard.show_page
     else:
         pages["📊 Dashboard & Reports"] = dashboard.show_page
 
+    # Sidebar selection
     selection = st.sidebar.radio("Go to:", list(pages.keys()))
     
+    st.sidebar.divider()
     if st.sidebar.button("Log Out"):
         st.session_state.clear()
-        st.session_state["logged_in"] = False
         st.rerun()
 
     # Display Selected Page
-    pages[selection]()
+    try:
+        pages[selection]()
+    except Exception as e:
+        st.error(f"Error loading page: {e}")
 
 if __name__ == "__main__":
     main()
