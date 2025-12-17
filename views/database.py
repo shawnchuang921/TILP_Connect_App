@@ -1,4 +1,4 @@
-# views/database.py (FINAL VERSION)
+# views/database.py (FINAL VERSION - Hardcoded Users Removed)
 import pandas as pd
 from datetime import datetime
 import streamlit as st 
@@ -57,7 +57,6 @@ def init_db():
             name TEXT UNIQUE
         )'''))
         
-        # Note: 'author' column added here
         conn.execute(text('''CREATE TABLE IF NOT EXISTS progress (
             id SERIAL PRIMARY KEY,
             date TEXT,
@@ -85,17 +84,17 @@ def init_db():
         )'''))
 
         # Initial Data Load
+        # KEEP: The admin user is kept for initial access.
         conn.execute(text("INSERT INTO users (username, password, role, child_link) VALUES (:u, :p, :r, :c) ON CONFLICT (username) DO NOTHING"),
                      {"u": "adminuser", "p": "admin123", "r": "admin", "c": "All"})
-        # Add basic therapist users for testing
-        conn.execute(text("INSERT INTO users (username, password, role, child_link) VALUES (:u, :p, :r, :c) ON CONFLICT (username) DO NOTHING"),
-                     {"u": "otuser", "p": "ot123", "r": "OT", "c": "Child1"})
-        conn.execute(text("INSERT INTO users (username, password, role, child_link) VALUES (:u, :p, :r, :c) ON CONFLICT (username) DO NOTHING"),
-                     {"u": "slpuser", "p": "slp123", "r": "SLP", "c": "Child2"})
         
+        # REMOVED: otuser and slpuser hardcoding is removed here.
+        
+        # Add default disciplines/roles
         for d in ["OT", "SLP", "BC", "ECE", "Assistant"]:
             conn.execute(text("INSERT INTO disciplines (name) VALUES (:n) ON CONFLICT (name) DO NOTHING"), {"n": d})
             
+        # Add default goal areas
         for g in ["Regulation", "Communication", "Fine Motor", "Social Play"]:
             conn.execute(text("INSERT INTO goal_areas (name) VALUES (:n) ON CONFLICT (name) DO NOTHING"), {"n": g})
             
