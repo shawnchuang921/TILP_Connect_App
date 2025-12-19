@@ -1,94 +1,86 @@
 # views/billing.py
 import streamlit as st
 import pandas as pd
-from datetime import date
-from .database import get_invoices, create_invoice, get_list_data, update_invoice_status, delete_invoice
+from sqlalchemy import text
+from .database import ENGINE, get_list_data
 
+# --- DATABASE HELPERS ---
+def create_invoice(date, child, item, amount, status, note):
+    sql = text("INSERT INTO invoices (date, child_name, item_desc, amount, status, note) VALUES (:d, :c, :i, :a, :s, :n)")
+    with ENGINE.connect() as conn:
+        conn.execute(sql, {"d": str(date), "c": child, "i": item, "a": amount, "s": status, "n": note})
+        conn.commit()
+
+def update_invoice_status(inv_id, new_status):
+    with ENGINE.connect() as conn:
+        conn.execute(text("UPDATE invoices SET status = :s WHERE id = :id"), {"s": new_status, "id": inv_id})
+        conn.commit()
+
+def delete_invoice(inv_id):
+    with ENGINE.connect() as conn:
+        conn.execute(text("DELETE FROM invoices WHERE id = :id"), {"id": inv_id})
+        conn.commit()
+
+# --- MAIN PAGE ---
 def show_page():
     st.title("💳 Billing & Invoices")
-    
-    role = st.session_state.get('role', '').lower()
+    role = st.session_state.get('role', '')
     child_link = st.session_state.get('child_link')
 
-    # --- ADMIN VIEW: Create & Manage ---
-    if role == 'admin':
-        col_create, col_manage = st.columns(2)
-        
-        # 1. Create
-        with col_create.expander("➕ Create Invoice", expanded=False):
-            with st.form("inv_form"):
-                i_date = st.date_input("Date", date.today())
-                child_df = get_list_data("children")
-                children = child_df['child_name'].tolist() if not child_df.empty else []
-                selected_child = st.selectbox("Child", children)
-                desc = st.text_input("Description")
-                amount = st.number_input("Amount ($)", min_value=0.0, step=10.0)
-                status = st.selectbox("Status", ["Unpaid", "Paid", "Overdue"])
-                note = st.text_area("Notes")
-                if st.form_submit_button("Generate"):
-                    create_invoice(i_date, selected_child, desc, amount, status, note)
-                    st.success("Created!")
+    # ADMIN VIEW: Create Invoices
+    if role == "admin":
+        with st.expander("➕ Generate New Invoice"):
+            with st.form("billing_form", clear_on_submit=True):
+                c_df = get_list_data("children")
+                children = c_df['child_name'].tolist() if not c_df.empty else []
+                
+                col1, col2 = st.columns(2)
+                inv_date = col1.date_input("Invoice Date")
+                child = col1.selectbox("Child Name", children)
+                item = col2.text_input("Service Description", placeholder="e.g., Speech Therapy - Nov")
+                amount = col2.number_input("Amount ($)", min_value=0.0, step=10.0)
+                status = st.selectbox("Status", ["Unpaid", "Paid", "Pending", "Overdue"])
+                note = st.text_area("Internal Note")
+                
+                if st.form_submit_button("Create Invoice"):
+                    create_invoice(inv_date, child, item, amount, status, note)
+                    st.success("Invoice generated successfully.")
                     st.rerun()
 
-        # 2. Manage (Edit/Delete)
-        with col_manage.expander("🛠️ Manage Invoices", expanded=False):
-            st.info("Refer to the 'ID' in the table below.")
-            inv_id = st.number_input("Invoice ID to modify", min_value=1, step=1)
-            action = st.radio("Action", ["Update Status", "Delete Invoice"], horizontal=True)
-            
-            if action == "Update Status":
-                new_stat = st.selectbox("New Status", ["Paid", "Unpaid", "Overdue"])
-                if st.button("Update Status"):
-                    update_invoice_status(inv_id, new_stat)
-                    st.success(f"Invoice {inv_id} updated.")
-                    st.rerun()
-            else:
-                if st.button("🗑️ Delete Permanently", type="primary"):
-                    delete_invoice(inv_id)
-                    st.warning(f"Invoice {inv_id} deleted.")
-                    st.rerun()
-        
-        st.divider()
+    st.divider()
 
-    # --- PARENT/LIST VIEW ---
-    df = pd.DataFrame()
-    
-    if role == 'parent':
-        if child_link and child_link not in ["None", "All"]:
-            df = get_invoices(child_name=child_link)
-            st.subheader(f"Financial Overview for {child_link}")
+    # VIEWING LOGIC
+    with ENGINE.connect() as conn:
+        if role == "parent":
+            df = pd.read_sql(text("SELECT * FROM invoices WHERE child_name = :c ORDER BY date DESC"), conn, params={"c": child_link})
         else:
-            st.error("No child linked.")
-    elif role == 'admin':
-        child_df = get_list_data("children")
-        search_list = ["All"] + (child_df['child_name'].tolist() if not child_df.empty else [])
-        search_child = st.selectbox("Filter by Child", search_list)
-        if search_child != "All":
-            df = get_invoices(child_name=search_child)
-        else:
-            df = get_invoices()
+            df = pd.read_sql(text("SELECT * FROM invoices ORDER BY date DESC"), conn)
 
     if not df.empty:
-        df['date'] = pd.to_datetime(df['date']).dt.date
+        st.subheader("Transaction History")
         
-        # Summary
-        unpaid = df[df['status'] == 'Unpaid']['amount'].sum()
-        overdue = df[df['status'] == 'Overdue']['amount'].sum()
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Current Due", f"${unpaid:,.2f}")
-        c2.metric("Overdue", f"${overdue:,.2f}", delta_color="inverse")
-        c3.metric("Total History", f"${df['amount'].sum():,.2f}")
-        
-        st.write("### 🧾 Invoice History")
-        # Ensure 'id' is shown for Admin so they can use the Modify tool
-        cols = ['date', 'item_desc', 'amount', 'status', 'note']
-        if role == 'admin':
-            cols.insert(0, 'id')
-            
-        st.dataframe(df[cols].sort_values('date', ascending=False), use_container_width=True, hide_index=True)
-        
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download Statement", csv, "Statement.csv", "text/csv")
+        # Financial Summary for Admin
+        if role == "admin":
+            total_unpaid = df[df['status'] != 'Paid']['amount'].sum()
+            st.metric("Total Outstanding Balance", f"${total_unpaid:,.2f}")
+
+        for _, row in df.iterrows():
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([2, 2, 1])
+                c1.write(f"**{row['item_desc']}**")
+                c1.caption(f"Date: {row['date']} | Child: {row['child_name']}")
+                
+                color = "green" if row['status'] == "Paid" else "red"
+                c2.markdown(f"### ${row['amount']:.2f}")
+                c2.markdown(f":{color}[**Status: {row['status']}**]")
+                
+                if role == "admin":
+                    new_stat = c3.selectbox("Change Status", ["Unpaid", "Paid", "Pending", "Overdue"], key=f"stat_{row['id']}")
+                    if c3.button("Update", key=f"upd_{row['id']}"):
+                        update_invoice_status(row['id'], new_stat)
+                        st.rerun()
+                    if c3.button("🗑️", key=f"del_{row['id']}"):
+                        delete_invoice(row['id'])
+                        st.rerun()
     else:
-        st.info("No billing records.")
+        st.info("No billing records found.")
